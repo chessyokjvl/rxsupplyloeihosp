@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบจัดการยาสนับสนุนจิตเวชเลยฯ</title>
+  
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  
+  <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+
+  <style>
+    body { background-color: #f8f9fa; font-family: 'Prompt', sans-serif; overflow-x: hidden; color: #333; }
+    .card { border: none; border-radius: 1rem; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075); margin-bottom: 1.5rem; }
+    .stat-card { transition: transform 0.2s; }
+    .stat-card:hover { transform: translateY(-5px); }
+    .admin-only { display: none; }
+    
+    /* Loading Overlay */
+    #loadingOverlay {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(255, 255, 255, 0.9); z-index: 2000;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+    }
+
+    /* Sidebar & Layout */
+    .wrapper { display: flex; width: 100%; min-height: 100vh; }
+    .sidebar { width: 260px; background-color: #1e293b; color: #e2e8f0; flex-shrink: 0; transition: all 0.3s ease; z-index: 1000; }
+    .sidebar .brand { padding: 1.25rem; font-size: 1.05rem; font-weight: 600; border-bottom: 1px solid #334155; text-align: center; line-height: 1.4; }
+    .sidebar .nav-link { color: #cbd5e1; padding: 0.8rem 1.5rem; border-left: 4px solid transparent; cursor: pointer; transition: 0.2s; }
+    .sidebar .nav-link:hover, .sidebar .nav-link.active { background-color: #334155; border-left-color: #3b82f6; color: #fff; }
+    .main-content { flex-grow: 1; padding: 2rem; width: calc(100% - 260px); transition: all 0.3s ease; }
+    
+    /* Mobile Responsive Sidebar */
+    .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 999; }
+    @media (max-width: 768px) {
+      .sidebar { position: fixed; height: 100%; left: -260px; }
+      .sidebar.show { left: 0; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
+      .sidebar-overlay.show { display: block; }
+      .main-content { width: 100%; padding: 1rem; }
+    }
+    
+    /* Section Toggle Animation */
+    .content-section { display: none; }
+    .content-section.active { display: block; animation: fadeIn 0.4s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Print Styles */
+    @media print {
+      .sidebar, .btn, .d-md-none, .card-header, #filterSection { display: none !important; }
+      .main-content { width: 100% !important; padding: 0 !important; margin: 0 !important; }
+      body { background: white; }
+      .card { box-shadow: none; border: none; }
+      .admin-only { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="loadingOverlay">
+  <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
+  <h5 class="mt-3 text-secondary">กำลังเชื่อมต่อข้อมูล...</h5>
+</div>
+
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<div class="wrapper">
+  <nav class="sidebar" id="sidebar">
+    <div class="brand">
+      ระบบจัดการยาสนับสนุน<br>
+      <span class="text-info" style="font-size: 0.9em; font-weight: 400;">จิตเวชเลยราชนครินทร์</span>
+    </div>
+    <ul class="nav flex-column mt-3">
+      <li class="nav-item">
+        <a class="nav-link active" onclick="showSection('dashboardSection', this)">📊 Dashboard</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" onclick="showSection('tableSection', this)">📋 สรุปรายการขอเบิก</a>
+      </li>
+      <li class="nav-item admin-only mt-2">
+        <a class="nav-link text-warning" onclick="showFormModal()">➕ เพิ่มใบเบิกใหม่</a>
+      </li>
+      <li class="nav-item mt-5">
+        <a class="nav-link text-info" id="loginBtn" onclick="toggleLogin()">🔒 Login (Admin)</a>
+      </li>
+    </ul>
+  </nav>
+
+  <div class="main-content">
+    <button class="btn btn-dark d-md-none mb-3 shadow-sm" onclick="toggleSidebar()">
+      ☰ เมนู
+    </button>
+
+    <div class="card p-3 mb-4 bg-white" id="filterSection">
+      <div class="row g-2 align-items-center mb-2">
+        <div class="col-md-auto fw-bold text-secondary">ตัวกรองหลัก:</div>
+        <div class="col-md-2">
+          <select id="filterYear" class="form-select form-select-sm" onchange="applyFilters()">
+            <option value="">ทุกปีงบประมาณ</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select id="filterHospital" class="form-select form-select-sm" onchange="applyFilters()">
+            <option value="">ทุกโรงพยาบาล</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select id="filterStatus" class="form-select form-select-sm" onchange="applyFilters()">
+            <option value="">ทุกสถานะ</option>
+            <option value="ค้างชำระ">ค้างชำระ</option>
+            <option value="ชำระแล้ว">ชำระแล้ว</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select id="filterPayer" class="form-select form-select-sm" onchange="applyFilters()">
+            <option value="">ทุกผู้ชำระเงิน</option>
+            <option value="สสจ.เลย">สสจ.เลย</option>
+            <option value="โรงพยาบาลที่ขอเบิกชำระเอง">โรงพยาบาลที่ขอเบิกชำระเอง</option>
+          </select>
+        </div>
+      </div>
+      <div class="row g-2 align-items-center">
+        <div class="col-md-auto fw-bold text-secondary">ช่วงวันที่เบิก:</div>
+        <div class="col-md-2">
+          <input type="date" id="filterStartDate" class="form-control form-control-sm text-muted" onchange="applyFilters()">
+        </div>
+        <div class="col-md-auto text-secondary">-</div>
+        <div class="col-md-2">
+          <input type="date" id="filterEndDate" class="form-control form-control-sm text-muted" onchange="applyFilters()">
+        </div>
+        <div class="col-md-auto ms-auto">
+          <button class="btn btn-sm btn-outline-secondary w-100" onclick="resetFilters()">รีเซ็ตตัวกรอง</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="dashboardSection" class="content-section active">
+      <div class="row mb-3">
+        <div class="col-md-3 mb-3">
+          <div class="card stat-card h-100 bg-primary text-white p-4">
+            <h6 class="opacity-75" id="budgetTitle">งบประมาณ สสจ. (รวม)</h6>
+            <h3 id="totalBudget" class="mb-0">2,700,000 ฿</h3>
+          </div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <div class="card stat-card h-100 bg-danger text-white p-4">
+            <h6 class="opacity-75">ยอดเบิกหักจาก สสจ.</h6>
+            <h3 class="mb-0"><span id="usedBudget">0</span> ฿</h3>
+            <small id="usedPercent" class="fw-light">(0%)</small>
+          </div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <div class="card stat-card h-100 bg-success text-white p-4">
+            <h6 class="opacity-75">คงเหลืองบประมาณ</h6>
+            <h3 class="mb-0"><span id="remainBudget">0</span> ฿</h3>
+            <small id="remainPercent" class="fw-light">(0%)</small>
+          </div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <div class="card stat-card h-100 bg-secondary text-white p-4">
+            <h6 class="opacity-75">ยอด รพ. ชำระเอง (นอกงบ)</h6>
+            <h3 id="selfPayAmount" class="mb-0">0 ฿</h3>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card p-4">
+            <h5 class="mb-4">อันดับการขอเบิกรายโรงพยาบาล (เรียงลำดับ)</h5>
+            <div style="position: relative; height: 600px; width: 100%;">
+              <canvas id="barChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tableSection" class="content-section">
+      <div class="card p-4" id="exportArea">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+          <h5 class="mb-0">รายการขอเบิกเวชภัณฑ์</h5>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="exportExcel()">📊 Excel</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="exportPDF()">📄 PDF</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="window.print()">🖨️ Print</button>
+          </div>
+        </div>
+        
+        <div class="table-responsive">
+          <table class="table table-hover align-middle" style="min-width: 800px;">
+            <thead class="table-light">
+              <tr>
+                <th>วันที่เบิก</th>
+                <th>เลขที่ใบเบิก</th>
+                <th>เลขที่เอกสาร</th>
+                <th>รพ.ที่ขอเบิก</th>
+                <th class="text-end">มูลค่า (บาท)</th>
+                <th>ผู้ชำระเงิน</th>
+                <th class="text-center">สถานะ</th>
+                <th class="admin-only text-center">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="dataTableBody">
+              <tr><td colspan="8" class="text-center">กำลังโหลดข้อมูล...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="formModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content border-0 rounded-4">
+      <div class="modal-header bg-primary text-white rounded-top-4">
+        <h5 class="modal-title">จัดการข้อมูลใบเบิก</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4">
+        <form id="recordForm">
+          <input type="hidden" id="rowIndex">
+          <input type="hidden" id="recordID">
+          <div class="row g-3">
+            <div class="col-md-3 col-sm-6"><label class="form-label text-muted small">1. เลขที่ใบเบิก</label><input type="text" class="form-control fw-bold text-primary" id="reqNo"></div>
+            <div class="col-md-3 col-sm-6"><label class="form-label text-muted small">2. วันที่ใบเบิก</label><input type="date" class="form-control" id="reqDate"></div>
+            <div class="col-md-3 col-sm-6"><label class="form-label text-muted small">3. เลขที่เอกสารขอรับฯ</label><input type="text" class="form-control" id="docNo"></div>
+            <div class="col-md-3 col-sm-6"><label class="form-label text-muted small">4. ลงวันที่เอกสาร</label><input type="date" class="form-control" id="docDate"></div>
+            
+            <div class="col-md-4 col-sm-12">
+              <label class="form-label text-muted small">5. โรงพยาบาลที่ขอเบิก</label>
+              <select id="hospital" class="form-select" placeholder="พิมพ์ค้นหา หรือเลือกโรงพยาบาล..."></select>
+            </div>
+            
+            <div class="col-md-4 col-sm-6"><label class="form-label text-muted small">6. มูลค่ายาที่เบิก (บาท)</label><input type="number" class="form-control" id="amount"></div>
+            <div class="col-md-4 col-sm-6"><label class="form-label text-muted small">7. วันที่มีบันทึกตอบรับ</label><input type="date" class="form-control" id="receiptDate"></div>
+            <div class="col-md-3 col-sm-6">
+              <label class="form-label text-muted small">8. สถานะ</label>
+              <select class="form-select" id="status"><option value="ค้างชำระ">ค้างชำระ</option><option value="ชำระแล้ว">ชำระแล้ว</option></select>
+            </div>
+            <div class="col-md-3 col-sm-6"><label class="form-label text-muted small">9. วันที่เรียกเก็บ สสจ.</label><input type="date" class="form-control" id="billDate"></div>
+            <div class="col-md-3 col-sm-6"><label class="form-label text-muted small">10. วันที่ชำระเงิน</label><input type="date" class="form-control" id="payDate"></div>
+            <div class="col-md-3 col-sm-6">
+              <label class="form-label text-muted small">11. ผู้ชำระเงิน</label>
+              <select class="form-select" id="payer"><option value="สสจ.เลย">สสจ.เลย</option><option value="โรงพยาบาลที่ขอเบิกชำระเอง">โรงพยาบาลที่ขอเบิกชำระเอง</option></select>
+            </div>
+          </div>
+          <div class="text-end mt-4">
+            <button type="button" class="btn btn-light me-2" data-bs-dismiss="modal">ยกเลิก</button>
+            <button type="button" class="btn btn-primary px-4" id="saveBtn" onclick="saveData()">บันทึกข้อมูล</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="loginModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header bg-dark text-white rounded-top-4">
+        <h5 class="modal-title">Admin Login</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4">
+        <input type="password" id="adminPassword" class="form-control mb-2" placeholder="รหัสผ่าน">
+        <div id="loginError" class="text-danger small mb-3" style="display:none;">รหัสผ่านไม่ถูกต้อง</div>
+        <button class="btn btn-primary w-100" id="submitLoginBtn" onclick="doLogin()">เข้าสู่ระบบ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // ==========================================
+  // URL จาก Google Apps Script (API Endpoint)
+  // ==========================================
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxj_rpBcRwLpV7Nw5OhdKmXzYAon0kQXOKTNL7A1pz6qVPy9q7NUBtOSlLEdoSQv7mh/exec";
+  
+  let rawData = [];
+  let filteredData = [];
+  let budgetsData = {};
+  let isAdmin = false;
+  let chartBar;
+  let currentBudget = 2700000;
+  let hospitalSelect;
+
+  const masterHospitals = [
+    "รพ.เลย", "รพร.ด่านซ้าย", "รพ.เชียงคาน", "รพ.ปากชม", "รพ.นาด้วง",
+    "รพ.นาแห้ว", "รพ.ภูเรือ", "รพ.ท่าลี่", "รพ.วังสะพุง", "รพ.ภูกระดึง",
+    "รพ.ภูหลวง", "รพ.ผาขาว", "รพ.เอราวัณ", "รพ.หนองหิน"
+  ];
+
+  document.getElementById('adminPassword').addEventListener('keypress', function (e) {
+    if (e.key === 'Enter') { doLogin(); }
+  });
+
+  // เรียกใช้เมื่อเปิดเว็บ
+  window.onload = () => {
+    fetchAppData();
+  };
+
+  // --- API Functions (Fetch API) ---
+  async function fetchAppData() {
+    try {
+      const response = await fetch(WEB_APP_URL);
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        initApp(result.data);
+      } else {
+        alert("เกิดข้อผิดพลาดในการดึงข้อมูล: " + result.message);
+      }
+    } catch (error) {
+      console.error("Fetch Error:", error);
+      alert("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
+    } finally {
+      // ซ่อนหน้าจอ Loading เมื่อโหลดเสร็จ
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+  }
+
+  // --- UI Layout Functions ---
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('show');
+    document.getElementById('sidebarOverlay').classList.toggle('show');
+  }
+
+  function showSection(sectionId, element) {
+    document.querySelectorAll('.content-section').forEach(el => el.classList.remove('active'));
+    document.getElementById(sectionId).classList.add('active');
+    
+    if(element) {
+      document.querySelectorAll('.sidebar .nav-link').forEach(el => el.classList.remove('active'));
+      element.classList.add('active');
+    }
+    
+    // หุบ Sidebar อัตโนมัติเมื่อกดเลือกเมนู (บนมือถือ)
+    if(window.innerWidth <= 768) {
+      document.getElementById('sidebar').classList.remove('show');
+      document.getElementById('sidebarOverlay').classList.remove('show');
+    }
+  }
+
+  // --- Core Application Logic ---
+  function initApp(data) {
+    rawData = data.records || [];
+    budgetsData = data.budgets || {};
+    currentBudget = parseFloat(budgetsData['2569']) || 2700000;
+    document.getElementById('totalBudget').innerText = currentBudget.toLocaleString() + ' ฿';
+    
+    let hospFilter = document.getElementById('filterHospital');
+    let hospForm = document.getElementById('hospital');
+    let sortedHospitals = [...masterHospitals].sort();
+    
+    // ล้างค่าเก่าก่อนป้องกันการวาดซ้ำกรณีโหลดใหม่
+    hospFilter.innerHTML = '<option value="">ทุกโรงพยาบาล</option>';
+    hospForm.innerHTML = '<option value="">เลือกโรงพยาบาล...</option>';
+
+    sortedHospitals.forEach(h => { 
+      hospFilter.innerHTML += `<option value="${h}">${h}</option>`; 
+      hospForm.innerHTML += `<option value="${h}">${h}</option>`;
+    });
+
+    if(!hospitalSelect) {
+      hospitalSelect = new TomSelect("#hospital", {
+        create: false,
+        sortField: { field: "text", direction: "asc" }
+      });
+    }
+
+    let years = [...new Set(rawData.map(r => getFiscalYear(r['วันที่ใบเบิก'])).filter(Boolean))];
+    Object.keys(budgetsData).forEach(y => { if(!years.includes(y)) years.push(y); });
+    years.sort((a,b) => b - a); 
+    
+    let yearSelect = document.getElementById('filterYear');
+    yearSelect.innerHTML = '<option value="">ทุกปีงบประมาณ</option>';
+    years.forEach(y => { yearSelect.innerHTML += `<option value="${y}">ปีงบฯ ${y}</option>`; });
+    
+    if(years.includes('2569')) yearSelect.value = '2569';
+    else if(years.length > 0) yearSelect.value = years[0];
+
+    applyFilters();
+  }
+
+  function applyFilters() {
+    let fYear = document.getElementById('filterYear').value;
+    let fHosp = document.getElementById('filterHospital').value;
+    let fStatus = document.getElementById('filterStatus').value;
+    let fPayer = document.getElementById('filterPayer').value;
+    
+    let fStart = getComparableDateFromInput(document.getElementById('filterStartDate').value);
+    let fEnd = getComparableDateFromInput(document.getElementById('filterEndDate').value);
+
+    filteredData = rawData.filter(r => {
+      let sheetDateComp = getComparableDateFromSheet(r['วันที่ใบเบิก']);
+      let recYear = getFiscalYear(r['วันที่ใบเบิก']);
+
+      let rHosp = (r['โรงพยาบาลที่ขอเบิก'] || '').toString().trim();
+      let rStatus = (r['สถานะ'] || '').toString().trim();
+      let rPayer = (r['ผู้ชำระเงิน'] || '').toString().trim();
+
+      let matchYear = fYear === "" || recYear === fYear;
+      let matchHosp = fHosp === "" || rHosp === fHosp;
+      let matchStatus = fStatus === "" || rStatus === fStatus;
+      let matchPayer = fPayer === "" || rPayer === fPayer;
+      
+      let matchDate = true;
+      if (fStart && sheetDateComp && sheetDateComp < fStart) matchDate = false;
+      if (fEnd && sheetDateComp && sheetDateComp > fEnd) matchDate = false;
+
+      return matchYear && matchHosp && matchStatus && matchPayer && matchDate;
+    });
+
+    if (fYear && budgetsData[fYear]) {
+      currentBudget = parseFloat(budgetsData[fYear]);
+      document.getElementById('budgetTitle').innerText = `งบประมาณ สสจ. (ปี ${fYear.substring(2)})`;
+    } else {
+      currentBudget = parseFloat(budgetsData['2569']) || 2700000; 
+      document.getElementById('budgetTitle').innerText = fYear ? `งบประมาณ สสจ. (ปี ${fYear.substring(2)})` : `งบประมาณ สสจ. (รวม)`;
+    }
+    document.getElementById('totalBudget').innerText = currentBudget.toLocaleString() + ' ฿';
+
+    updateDashboard();
+    renderTable();
+  }
+
+  function resetFilters() {
+    document.getElementById('filterYear').value = "2569";
+    document.getElementById('filterHospital').value = "";
+    document.getElementById('filterStatus').value = "";
+    document.getElementById('filterPayer').value = "";
+    document.getElementById('filterStartDate').value = "";
+    document.getElementById('filterEndDate').value = "";
+    applyFilters();
+  }
+
+  function updateDashboard() {
+    let usedBySSJ = 0;
+    let usedBySelf = 0;
+    let hospitalSums = {};
+
+    filteredData.forEach(r => {
+      let amt = parseFloat(r['มูลค่ายาที่เบิก']) || 0;
+      let hosp = (r['โรงพยาบาลที่ขอเบิก'] || 'ไม่ระบุ').toString().trim();
+      let payer = (r['ผู้ชำระเงิน'] || '').toString().trim();
+
+      hospitalSums[hosp] = (hospitalSums[hosp] || 0) + amt;
+
+      if(payer === 'สสจ.เลย') { usedBySSJ += amt; } else { usedBySelf += amt; }
+    });
+
+    let remain = currentBudget - usedBySSJ;
+    let percentUsed = currentBudget > 0 ? ((usedBySSJ / currentBudget) * 100).toFixed(1) : 0;
+    let percentRemain = currentBudget > 0 ? ((remain / currentBudget) * 100).toFixed(1) : 0;
+
+    document.getElementById('usedBudget').innerText = usedBySSJ.toLocaleString();
+    document.getElementById('usedPercent').innerText = `(${percentUsed}%)`;
+    document.getElementById('remainBudget').innerText = remain.toLocaleString();
+    document.getElementById('remainPercent').innerText = `(${percentRemain}%)`;
+    document.getElementById('selfPayAmount').innerText = usedBySelf.toLocaleString() + ' ฿';
+
+    renderBarChart(hospitalSums);
+  }
+
+  function renderBarChart(hospitalSums) {
+    let sortedData = Object.entries(hospitalSums).sort((a, b) => b[1] - a[1]);
+    let labels = sortedData.map(item => {
+      let pct = currentBudget > 0 ? ((item[1] / currentBudget) * 100).toFixed(2) : 0;
+      return `${item[0]} (${pct}%)`;
+    });
+    let dataValues = sortedData.map(item => item[1]);
+
+    const ctx = document.getElementById('barChart').getContext('2d');
+    if(chartBar) chartBar.destroy();
+    
+    chartBar = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{ label: 'มูลค่าการเบิก (บาท)', data: dataValues, backgroundColor: '#3b82f6', borderRadius: 4, barPercentage: 0.6 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 12 } } } }
+      }
+    });
+  }
+
+  function renderTable() {
+    let tbody = document.getElementById('dataTableBody');
+    tbody.innerHTML = '';
+    if(filteredData.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">ไม่มีข้อมูลที่ตรงกับเงื่อนไข</td></tr>';
+      return;
+    }
+
+    filteredData.forEach(r => {
+      let statusText = (r['สถานะ'] || '').toString().trim();
+      let payerText = (r['ผู้ชำระเงิน'] || '').toString().trim();
+      
+      let statusBadge = '';
+      if (statusText === 'ชำระแล้ว') {
+        statusBadge = `<span class="badge bg-success px-3 py-2 rounded-pill shadow-sm">ชำระแล้ว</span>`;
+      } else if (statusText === 'ค้างชำระ') {
+        statusBadge = `<span class="badge bg-danger px-3 py-2 rounded-pill shadow-sm">ค้างชำระ</span>`;
+      } else {
+        statusBadge = `<span class="badge bg-warning text-dark px-3 py-2 rounded-pill">${statusText || '-'}</span>`;
+      }
+
+      let tr = `<tr>
+        <td class="text-muted">${r['วันที่ใบเบิก'] || '-'}</td>
+        <td class="fw-bold text-dark">${r['เลขที่ใบเบิก'] || '-'}</td>
+        <td>${r['เลขที่เอกสารขอรับฯ'] || '-'}</td>
+        <td class="fw-medium text-nowrap">${r['โรงพยาบาลที่ขอเบิก'] || '-'}</td>
+        <td class="text-end fw-bold text-primary">${Number(r['มูลค่ายาที่เบิก'] || 0).toLocaleString()}</td>
+        <td class="text-nowrap"><span class="badge ${payerText === 'สสจ.เลย' ? 'bg-primary' : 'bg-secondary'} px-2 py-1">${payerText || '-'}</span></td>
+        <td class="text-center text-nowrap">${statusBadge}</td>
+        <td class="admin-only text-center">
+          <button class="btn btn-sm btn-light border shadow-sm" onclick="editRecord(${r.rowIndex})">✏️ แก้ไข</button>
+        </td>
+      </tr>`;
+      tbody.innerHTML += tr;
+    });
+    toggleAdminUI();
+  }
+
+  // --- Date Helpers ---
+  function getFiscalYear(dateStr) {
+    if (!dateStr) return "";
+    let parts = dateStr.split('/');
+    if (parts.length !== 3) return "";
+    let month = parseInt(parts[1]);
+    let year = parseInt(parts[2]);
+    if (year < 2400) year += 543; 
+    return (month >= 10) ? (year + 1).toString() : year.toString();
+  }
+  function getComparableDateFromInput(dateStr) {
+    if (!dateStr) return null;
+    let parts = dateStr.split('-');
+    let year = parseInt(parts[0]);
+    if (year < 2400) year += 543; 
+    return parseInt(`${year}${parts[1]}${parts[2]}`);
+  }
+  function getComparableDateFromSheet(dateStr) {
+    if (!dateStr) return null;
+    let parts = dateStr.split('/');
+    if (parts.length !== 3) return null;
+    let year = parseInt(parts[2]);
+    if (year < 2400) year += 543; 
+    return parseInt(`${year}${parts[1]}${parts[0]}`);
+  }
+  function toDateInputFormat(thDate) {
+    if (!thDate) return '';
+    let parts = thDate.split('/');
+    if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    return thDate;
+  }
+  function toDDMMYYYY(isoDate) {
+    if (!isoDate) return '';
+    let parts = isoDate.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return isoDate;
+  }
+
+  // --- Export ---
+  function exportExcel() {
+    let exportData = filteredData.map(r => ({
+      "วันที่เบิก": r['วันที่ใบเบิก'],
+      "เลขที่ใบเบิก": r['เลขที่ใบเบิก'],
+      "เลขที่เอกสารขอรับฯ": r['เลขที่เอกสารขอรับฯ'],
+      "ลงวันที่เอกสาร": r['ลงวันที่เอกสาร'],
+      "โรงพยาบาลที่ขอเบิก": r['โรงพยาบาลที่ขอเบิก'],
+      "มูลค่ายาที่เบิก (บาท)": r['มูลค่ายาที่เบิก'],
+      "วันที่มีบันทึกตอบรับ": r['วันที่มีบันทึกตอบรับ'],
+      "สถานะ": r['สถานะ'],
+      "วันที่เรียกเก็บ สสจ.": r['วันที่เรียกเก็บไปยัง สสจ.'],
+      "วันที่ชำระเงิน": r['วันที่ชำระเงิน'],
+      "ผู้ชำระเงิน": r['ผู้ชำระเงิน']
+    }));
+    let ws = XLSX.utils.json_to_sheet(exportData);
+    let wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "รายการขอเบิก");
+    XLSX.writeFile(wb, "รายงานการเบิกเวชภัณฑ์.xlsx");
+  }
+
+  function exportPDF() {
+    let elementsToHide = document.querySelectorAll('.admin-only, .btn');
+    elementsToHide.forEach(el => el.style.display = 'none');
+    const element = document.getElementById('exportArea');
+    const opt = {
+      margin: 0.5, filename: 'รายงานการเบิกเวชภัณฑ์.pdf',
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }
+    };
+    html2pdf().set(opt).from(element).save().then(() => {
+      toggleAdminUI();
+      document.querySelectorAll('.btn').forEach(el => el.style.display = 'inline-block');
+    });
+  }
+
+  // --- Admin API Handlers ---
+  function toggleLogin() {
+    if (isAdmin) {
+      isAdmin = false;
+      toggleAdminUI();
+      document.getElementById('loginBtn').innerText = '🔒 Login (Admin)';
+      document.getElementById('loginBtn').classList.replace('text-danger', 'text-info');
+    } else {
+      document.getElementById('adminPassword').value = '';
+      document.getElementById('loginError').style.display = 'none';
+      new bootstrap.Modal(document.getElementById('loginModal')).show();
+      setTimeout(() => document.getElementById('adminPassword').focus(), 500);
+    }
+  }
+
+  async function doLogin() {
+    let pass = document.getElementById('adminPassword').value;
+    let btn = document.getElementById('submitLoginBtn');
+    btn.innerText = 'กำลังตรวจสอบ...';
+    btn.disabled = true;
+
+    try {
+      const response = await fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ต้องใช้ text/plain เพื่อกัน CORS Preflight error
+        body: JSON.stringify({ action: 'verifyLogin', password: pass })
+      });
+      const result = await response.json();
+      
+      if (result.status === 'success' && result.result.success === true) {
+        isAdmin = true;
+        toggleAdminUI();
+        bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
+        document.getElementById('loginBtn').innerText = '🔓 Logout';
+        document.getElementById('loginBtn').classList.replace('text-info', 'text-danger');
+      } else {
+        document.getElementById('loginError').style.display = 'block';
+      }
+    } catch (err) {
+      alert("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      btn.innerText = 'เข้าสู่ระบบ';
+      btn.disabled = false;
+    }
+  }
+
+  function toggleAdminUI() {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = isAdmin ? 'block' : 'none');
+    document.querySelectorAll('td.admin-only, th.admin-only').forEach(el => el.style.display = isAdmin ? 'table-cell' : 'none');
+  }
+
+  function showFormModal() {
+    document.getElementById('recordForm').reset();
+    document.getElementById('rowIndex').value = '';
+    document.getElementById('recordID').value = '';
+    
+    if(hospitalSelect) hospitalSelect.clear();
+    new bootstrap.Modal(document.getElementById('formModal')).show();
+  }
+
+  function editRecord(rowIndex) {
+    let record = rawData.find(r => r.rowIndex === rowIndex);
+    if(record) {
+      document.getElementById('rowIndex').value = record.rowIndex;
+      document.getElementById('recordID').value = record['ID'] || '';
+      document.getElementById('reqNo').value = record['เลขที่ใบเบิก'] || '';
+      document.getElementById('reqDate').value = toDateInputFormat(record['วันที่ใบเบิก']);
+      document.getElementById('docNo').value = record['เลขที่เอกสารขอรับฯ'] || '';
+      document.getElementById('docDate').value = toDateInputFormat(record['ลงวันที่เอกสาร']);
+      document.getElementById('amount').value = record['มูลค่ายาที่เบิก'] || '';
+      document.getElementById('receiptDate').value = toDateInputFormat(record['วันที่มีบันทึกตอบรับ']);
+      document.getElementById('status').value = (record['สถานะ'] || 'ค้างชำระ').toString().trim();
+      document.getElementById('billDate').value = toDateInputFormat(record['วันที่เรียกเก็บไปยัง สสจ.']);
+      document.getElementById('payDate').value = toDateInputFormat(record['วันที่ชำระเงิน']);
+      document.getElementById('payer').value = (record['ผู้ชำระเงิน'] || 'สสจ.เลย').toString().trim();
+      
+      let hospName = (record['โรงพยาบาลที่ขอเบิก'] || '').toString().trim();
+      if(hospitalSelect) {
+        if(hospName && !masterHospitals.includes(hospName)) {
+           hospitalSelect.addOption({value: hospName, text: hospName});
+        }
+        hospitalSelect.setValue(hospName);
+      }
+      new bootstrap.Modal(document.getElementById('formModal')).show();
+    }
+  }
+
+  async function saveData() {
+    let selectedHospital = hospitalSelect ? hospitalSelect.getValue() : document.getElementById('hospital').value;
+    let btn = document.getElementById('saveBtn');
+    btn.innerText = 'กำลังบันทึก...';
+    btn.disabled = true;
+
+    let data = {
+      rowIndex: document.getElementById('rowIndex').value,
+      ID: document.getElementById('recordID').value,
+      reqNo: document.getElementById('reqNo').value,
+      reqDate: toDDMMYYYY(document.getElementById('reqDate').value),
+      docNo: document.getElementById('docNo').value,
+      docDate: toDDMMYYYY(document.getElementById('docDate').value),
+      hospital: selectedHospital, 
+      amount: document.getElementById('amount').value,
+      receiptDate: toDDMMYYYY(document.getElementById('receiptDate').value),
+      status: document.getElementById('status').value,
+      billDate: toDDMMYYYY(document.getElementById('billDate').value),
+      payDate: toDDMMYYYY(document.getElementById('payDate').value),
+      payer: document.getElementById('payer').value
+    };
+    
+    try {
+      const response = await fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'saveRecord', data: data })
+      });
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        bootstrap.Modal.getInstance(document.getElementById('formModal')).hide();
+        document.getElementById('loadingOverlay').style.display = 'flex'; // แสดงหน้าโหลด
+        await fetchAppData(); // โหลดข้อมูลใหม่ล่าสุดมาแสดง
+        alert('บันทึกข้อมูลเรียบร้อยแล้ว');
+      } else {
+        alert("เกิดข้อผิดพลาดในการบันทึก: " + result.message);
+      }
+    } catch (err) {
+      alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองอีกครั้ง");
+    } finally {
+      btn.innerText = 'บันทึกข้อมูล';
+      btn.disabled = false;
+    }
+  }
+</script>
+</body>
+</html>
