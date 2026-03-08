@@ -283,8 +283,8 @@
   // ==========================================
   // URL จาก Google Apps Script (API Endpoint)
   // ==========================================
-  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwNcDpmHrZwOuhsAPRQ6feWk2w4CI5vXIBJiH-pWr1TV38_MVxC8XYlWhw7klLuuaE/exec";
-  
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxj_rpBcRwLpV7Nw5OhdKmXzYAon0kQXOKTNL7A1pz6qVPy9q7NUBtOSlLEdoSQv7mh/exec";
+
   let rawData = [];
   let filteredData = [];
   let budgetsData = {};
@@ -303,32 +303,27 @@
     if (e.key === 'Enter') { doLogin(); }
   });
 
-  // เรียกใช้เมื่อเปิดเว็บ
   window.onload = () => {
     fetchAppData();
   };
 
-  // --- API Functions (Fetch API) ---
   async function fetchAppData() {
     try {
       const response = await fetch(WEB_APP_URL);
       const result = await response.json();
-      
       if (result.status === 'success') {
         initApp(result.data);
       } else {
-        alert("เกิดข้อผิดพลาดในการดึงข้อมูล: " + result.message);
+        alert("เกิดข้อผิดพลาด: " + result.message);
       }
     } catch (error) {
       console.error("Fetch Error:", error);
       alert("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
     } finally {
-      // ซ่อนหน้าจอ Loading เมื่อโหลดเสร็จ
       document.getElementById('loadingOverlay').style.display = 'none';
     }
   }
 
-  // --- UI Layout Functions ---
   function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('show');
     document.getElementById('sidebarOverlay').classList.toggle('show');
@@ -337,36 +332,55 @@
   function showSection(sectionId, element) {
     document.querySelectorAll('.content-section').forEach(el => el.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
-    
     if(element) {
       document.querySelectorAll('.sidebar .nav-link').forEach(el => el.classList.remove('active'));
       element.classList.add('active');
     }
-    
-    // หุบ Sidebar อัตโนมัติเมื่อกดเลือกเมนู (บนมือถือ)
     if(window.innerWidth <= 768) {
       document.getElementById('sidebar').classList.remove('show');
       document.getElementById('sidebarOverlay').classList.remove('show');
     }
   }
 
-  // --- Core Application Logic ---
+  // --- ฟังก์ชันใหม่: แปลงวันที่จาก API (ISO) กลับเป็น DD/MM/YYYY ---
+  function normalizeDate(val) {
+    if (!val) return "";
+    if (typeof val === 'string' && val.includes('T')) {
+      let d = new Date(val); // แปลง ISO String เป็น Date Object ท้องถิ่น
+      let day = d.getDate().toString().padStart(2, '0');
+      let month = (d.getMonth() + 1).toString().padStart(2, '0');
+      let year = d.getFullYear() + 543; // บวก 543 เป็นปี พ.ศ.
+      return `${day}/${month}/${year}`;
+    }
+    return val;
+  }
+
   function initApp(data) {
-    rawData = data.records || [];
+    // แปลงวันที่ก่อนที่จะนำไปเข้ากระบวนการอื่น
+    rawData = (data.records || []).map(r => {
+      const dateFields = [
+        'วันที่ใบเบิก', 'ลงวันที่เอกสาร', 'วันที่มีบันทึกตอบรับ',
+        'วันที่เรียกเก็บ สสจ.', 'วันที่ชำระเงิน'
+      ];
+      dateFields.forEach(field => {
+        if (r[field]) r[field] = normalizeDate(r[field]);
+      });
+      return r;
+    });
+
     budgetsData = data.budgets || {};
     currentBudget = parseFloat(budgetsData['2569']) || 2700000;
     document.getElementById('totalBudget').innerText = currentBudget.toLocaleString() + ' ฿';
-    
+
     let hospFilter = document.getElementById('filterHospital');
     let hospForm = document.getElementById('hospital');
     let sortedHospitals = [...masterHospitals].sort();
-    
-    // ล้างค่าเก่าก่อนป้องกันการวาดซ้ำกรณีโหลดใหม่
+
     hospFilter.innerHTML = '<option value="">ทุกโรงพยาบาล</option>';
     hospForm.innerHTML = '<option value="">เลือกโรงพยาบาล...</option>';
 
-    sortedHospitals.forEach(h => { 
-      hospFilter.innerHTML += `<option value="${h}">${h}</option>`; 
+    sortedHospitals.forEach(h => {
+      hospFilter.innerHTML += `<option value="${h}">${h}</option>`;
       hospForm.innerHTML += `<option value="${h}">${h}</option>`;
     });
 
@@ -379,12 +393,12 @@
 
     let years = [...new Set(rawData.map(r => getFiscalYear(r['วันที่ใบเบิก'])).filter(Boolean))];
     Object.keys(budgetsData).forEach(y => { if(!years.includes(y)) years.push(y); });
-    years.sort((a,b) => b - a); 
-    
+    years.sort((a,b) => b - a);
+
     let yearSelect = document.getElementById('filterYear');
     yearSelect.innerHTML = '<option value="">ทุกปีงบประมาณ</option>';
     years.forEach(y => { yearSelect.innerHTML += `<option value="${y}">ปีงบฯ ${y}</option>`; });
-    
+
     if(years.includes('2569')) yearSelect.value = '2569';
     else if(years.length > 0) yearSelect.value = years[0];
 
@@ -396,7 +410,7 @@
     let fHosp = document.getElementById('filterHospital').value;
     let fStatus = document.getElementById('filterStatus').value;
     let fPayer = document.getElementById('filterPayer').value;
-    
+
     let fStart = getComparableDateFromInput(document.getElementById('filterStartDate').value);
     let fEnd = getComparableDateFromInput(document.getElementById('filterEndDate').value);
 
@@ -412,7 +426,7 @@
       let matchHosp = fHosp === "" || rHosp === fHosp;
       let matchStatus = fStatus === "" || rStatus === fStatus;
       let matchPayer = fPayer === "" || rPayer === fPayer;
-      
+
       let matchDate = true;
       if (fStart && sheetDateComp && sheetDateComp < fStart) matchDate = false;
       if (fEnd && sheetDateComp && sheetDateComp > fEnd) matchDate = false;
@@ -424,7 +438,7 @@
       currentBudget = parseFloat(budgetsData[fYear]);
       document.getElementById('budgetTitle').innerText = `งบประมาณ สสจ. (ปี ${fYear.substring(2)})`;
     } else {
-      currentBudget = parseFloat(budgetsData['2569']) || 2700000; 
+      currentBudget = parseFloat(budgetsData['2569']) || 2700000;
       document.getElementById('budgetTitle').innerText = fYear ? `งบประมาณ สสจ. (ปี ${fYear.substring(2)})` : `งบประมาณ สสจ. (รวม)`;
     }
     document.getElementById('totalBudget').innerText = currentBudget.toLocaleString() + ' ฿';
@@ -481,7 +495,7 @@
 
     const ctx = document.getElementById('barChart').getContext('2d');
     if(chartBar) chartBar.destroy();
-    
+
     chartBar = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -507,7 +521,7 @@
     filteredData.forEach(r => {
       let statusText = (r['สถานะ'] || '').toString().trim();
       let payerText = (r['ผู้ชำระเงิน'] || '').toString().trim();
-      
+
       let statusBadge = '';
       if (statusText === 'ชำระแล้ว') {
         statusBadge = `<span class="badge bg-success px-3 py-2 rounded-pill shadow-sm">ชำระแล้ว</span>`;
@@ -534,21 +548,20 @@
     toggleAdminUI();
   }
 
-  // --- Date Helpers ---
   function getFiscalYear(dateStr) {
     if (!dateStr) return "";
     let parts = dateStr.split('/');
     if (parts.length !== 3) return "";
     let month = parseInt(parts[1]);
     let year = parseInt(parts[2]);
-    if (year < 2400) year += 543; 
+    if (year < 2400) year += 543;
     return (month >= 10) ? (year + 1).toString() : year.toString();
   }
   function getComparableDateFromInput(dateStr) {
     if (!dateStr) return null;
     let parts = dateStr.split('-');
     let year = parseInt(parts[0]);
-    if (year < 2400) year += 543; 
+    if (year < 2400) year += 543;
     return parseInt(`${year}${parts[1]}${parts[2]}`);
   }
   function getComparableDateFromSheet(dateStr) {
@@ -556,7 +569,7 @@
     let parts = dateStr.split('/');
     if (parts.length !== 3) return null;
     let year = parseInt(parts[2]);
-    if (year < 2400) year += 543; 
+    if (year < 2400) year += 543;
     return parseInt(`${year}${parts[1]}${parts[0]}`);
   }
   function toDateInputFormat(thDate) {
@@ -572,7 +585,6 @@
     return isoDate;
   }
 
-  // --- Export ---
   function exportExcel() {
     let exportData = filteredData.map(r => ({
       "วันที่เบิก": r['วันที่ใบเบิก'],
@@ -583,7 +595,7 @@
       "มูลค่ายาที่เบิก (บาท)": r['มูลค่ายาที่เบิก'],
       "วันที่มีบันทึกตอบรับ": r['วันที่มีบันทึกตอบรับ'],
       "สถานะ": r['สถานะ'],
-      "วันที่เรียกเก็บ สสจ.": r['วันที่เรียกเก็บไปยัง สสจ.'],
+      "วันที่เรียกเก็บ สสจ.": r['วันที่เรียกเก็บไปยัง สสจ.'] || r['วันที่เรียกเก็บ สสจ.'],
       "วันที่ชำระเงิน": r['วันที่ชำระเงิน'],
       "ผู้ชำระเงิน": r['ผู้ชำระเงิน']
     }));
@@ -609,7 +621,6 @@
     });
   }
 
-  // --- Admin API Handlers ---
   function toggleLogin() {
     if (isAdmin) {
       isAdmin = false;
@@ -633,11 +644,11 @@
     try {
       const response = await fetch(WEB_APP_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ต้องใช้ text/plain เพื่อกัน CORS Preflight error
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'verifyLogin', password: pass })
       });
       const result = await response.json();
-      
+
       if (result.status === 'success' && result.result.success === true) {
         isAdmin = true;
         toggleAdminUI();
@@ -664,7 +675,7 @@
     document.getElementById('recordForm').reset();
     document.getElementById('rowIndex').value = '';
     document.getElementById('recordID').value = '';
-    
+
     if(hospitalSelect) hospitalSelect.clear();
     new bootstrap.Modal(document.getElementById('formModal')).show();
   }
@@ -681,10 +692,10 @@
       document.getElementById('amount').value = record['มูลค่ายาที่เบิก'] || '';
       document.getElementById('receiptDate').value = toDateInputFormat(record['วันที่มีบันทึกตอบรับ']);
       document.getElementById('status').value = (record['สถานะ'] || 'ค้างชำระ').toString().trim();
-      document.getElementById('billDate').value = toDateInputFormat(record['วันที่เรียกเก็บไปยัง สสจ.']);
+      document.getElementById('billDate').value = toDateInputFormat(record['วันที่เรียกเก็บไปยัง สสจ.'] || record['วันที่เรียกเก็บ สสจ.']);
       document.getElementById('payDate').value = toDateInputFormat(record['วันที่ชำระเงิน']);
       document.getElementById('payer').value = (record['ผู้ชำระเงิน'] || 'สสจ.เลย').toString().trim();
-      
+
       let hospName = (record['โรงพยาบาลที่ขอเบิก'] || '').toString().trim();
       if(hospitalSelect) {
         if(hospName && !masterHospitals.includes(hospName)) {
@@ -709,7 +720,7 @@
       reqDate: toDDMMYYYY(document.getElementById('reqDate').value),
       docNo: document.getElementById('docNo').value,
       docDate: toDDMMYYYY(document.getElementById('docDate').value),
-      hospital: selectedHospital, 
+      hospital: selectedHospital,
       amount: document.getElementById('amount').value,
       receiptDate: toDDMMYYYY(document.getElementById('receiptDate').value),
       status: document.getElementById('status').value,
@@ -717,7 +728,7 @@
       payDate: toDDMMYYYY(document.getElementById('payDate').value),
       payer: document.getElementById('payer').value
     };
-    
+
     try {
       const response = await fetch(WEB_APP_URL, {
         method: 'POST',
@@ -725,11 +736,11 @@
         body: JSON.stringify({ action: 'saveRecord', data: data })
       });
       const result = await response.json();
-      
+
       if (result.status === 'success') {
         bootstrap.Modal.getInstance(document.getElementById('formModal')).hide();
-        document.getElementById('loadingOverlay').style.display = 'flex'; // แสดงหน้าโหลด
-        await fetchAppData(); // โหลดข้อมูลใหม่ล่าสุดมาแสดง
+        document.getElementById('loadingOverlay').style.display = 'flex';
+        await fetchAppData();
         alert('บันทึกข้อมูลเรียบร้อยแล้ว');
       } else {
         alert("เกิดข้อผิดพลาดในการบันทึก: " + result.message);
@@ -742,6 +753,8 @@
     }
   }
 </script>
+
 </body>
 
 </html>
+
